@@ -1,0 +1,21 @@
+# Precomputed artifacts are regeneratable from candidates.jsonl via
+# `python -m src.precompute` -- not checked in to keep the repo lean.
+artifacts/*.npz
+artifacts/*.parquet
+artifacts/*.pkl
+artifacts/candidate_order.csv
+
+# Raw data (not ours to redistribute / too large for git)
+data/candidates.jsonl
+*.jsonl
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# OS
+.DS_Store
+
+# Scratch
+notebooks/explore*.py.bak
