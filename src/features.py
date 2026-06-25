@@ -52,7 +52,22 @@ def location_fit_score(country: str, location: str, willing_to_relocate: bool) -
             return 0.9
         return 0.75  # other India Tier-1 cities (Bangalore, Chennai, Kolkata, etc.) -- relocation-plausible
     # Outside India: JD says "case-by-case, no visa sponsorship"
-    return 0.25 if willing_to_relocate else 0.08
+    return 0.30 if willing_to_relocate else 0.10
+
+
+def visa_gate_penalty(country: str, willing_to_relocate: bool) -> float:
+    """
+    JD states unconditionally: 'we don't sponsor work visas.' A candidate
+    located outside India who is ALSO not willing to relocate is very
+    unlikely to be hireable for this role regardless of technical strength.
+    This is treated as a near-hard multiplicative gate (not just a softly
+    weighted additive term) since the JD frames it as a constraint, not a
+    preference. We don't fully zero it out -- 'case-by-case' leaves a sliver
+    of possibility -- but it should dominate over skill/semantic strength.
+    """
+    if country != COUNTRY_INDIA and not willing_to_relocate:
+        return 0.15
+    return 1.0
 
 
 def notice_period_score(notice_days: int) -> float:
@@ -306,6 +321,7 @@ def extract_features(candidate: dict) -> dict:
         "candidate_id": candidate["candidate_id"],
         "experience_fit": experience_fit_score(p["years_of_experience"]),
         "location_fit": location_fit_score(p["country"], p["location"], sig["willing_to_relocate"]),
+        "visa_gate_penalty": visa_gate_penalty(p["country"], sig["willing_to_relocate"]),
         "notice_fit": notice_period_score(sig["notice_period_days"]),
         "title_relevance_gate": title_relevance_gate(p["current_title"], history),
         "consulting_penalty": consulting_only_penalty(history, p["current_industry"], p["current_company"]),

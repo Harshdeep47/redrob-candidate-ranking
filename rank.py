@@ -50,7 +50,7 @@ W_NOTICE = 0.05
 # Multiplicative penalty terms (applied after the weighted sum, each in (0,1])
 PENALTY_FIELDS = [
     "title_relevance_gate", "consulting_penalty", "architecture_penalty",
-    "title_chaser_penalty", "cv_speech_penalty",
+    "title_chaser_penalty", "cv_speech_penalty", "visa_gate_penalty",
 ]
 
 
