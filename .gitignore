@@ -1,13 +1,22 @@
 # Precomputed artifacts are regeneratable from candidates.jsonl via
-# `python -m src.precompute` -- not checked in to keep the repo lean.
+# `python -m src.precompute` -- not checked in. This is deliberate, not
+# just "keep the repo lean": artifacts are built from a specific
+# candidates.jsonl, and rank.py validates a hash of that file against what
+# the cached artifacts were built from (see ensure_artifacts() in rank.py).
+# Shipping artifacts built from a different candidates file than whatever
+# Redrob's Stage 3 sandbox actually provides would be actively wrong, not
+# just stale -- so precompute always runs fresh against the real input file.
 artifacts/*.npz
 artifacts/*.parquet
 artifacts/*.pkl
 artifacts/candidate_order.csv
+artifacts/*.meta.json
 
-# Raw data (not ours to redistribute / too large for git)
+# Raw data (not ours to redistribute / too large for git) -- but small
+# sample fixtures used for sandbox/local testing ARE checked in (see
+# data/sample_candidates_*.jsonl)
 data/candidates.jsonl
-*.jsonl
+candidates.jsonl
 
 # Python
 __pycache__/

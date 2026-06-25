@@ -63,10 +63,24 @@ def normalize(arr: np.ndarray) -> np.ndarray:
 
 def ensure_artifacts(candidates_path: str, artifacts_dir: str):
     needed = ["features.parquet", "candidate_tfidf.npz", "jd_tfidf.npz",
-              "vectorizer.pkl", "candidate_order.csv"]
+              "vectorizer.pkl", "candidate_order.csv", "source.meta.json"]
     missing = [f for f in needed if not os.path.exists(os.path.join(artifacts_dir, f))]
-    if missing:
-        print(f"Artifacts missing {missing}, running precompute first...")
+
+    stale = False
+    if not missing:
+        from src.precompute import file_fingerprint
+        import orjson as _orjson
+        with open(os.path.join(artifacts_dir, "source.meta.json"), "rb") as f:
+            meta = _orjson.loads(f.read())
+        current_fp = file_fingerprint(candidates_path)
+        if meta.get("source_fingerprint") != current_fp:
+            print("Cached artifacts were built from a different candidates file -- "
+                  "regenerating to avoid ranking against stale data.")
+            stale = True
+
+    if missing or stale:
+        if missing:
+            print(f"Artifacts missing {missing}, running precompute first...")
         os.makedirs(artifacts_dir, exist_ok=True)
         from src import precompute
         sys.argv = ["precompute", "--candidates", candidates_path, "--out", artifacts_dir]
@@ -133,12 +147,14 @@ def main():
 
     feat_df["final_score"] = final_score
 
-    # --- rank, take top 100 ---
+    # --- rank, take top N -- adapts to pool size so this also works on the
+    # sandbox's small samples (<=100 candidates), not just the full 100K pool ---
     ranked = feat_df.sort_values(
         ["final_score", "candidate_id"], ascending=[False, True]
     ).reset_index(drop=True)
-    top100 = ranked.head(TOP_N).copy()
-    top100["rank"] = np.arange(1, TOP_N + 1)
+    top_n = min(TOP_N, len(ranked))
+    top100 = ranked.head(top_n).copy()
+    top100["rank"] = np.arange(1, top_n + 1)
 
     # Rescale score into the (0,1] display range expected by the sample
     # submission, while preserving strict ordering (ties broken by candidate_id
@@ -146,7 +162,7 @@ def main():
     raw = top100["final_score"].values
     rmin, rmax = raw.min(), raw.max()
     if rmax - rmin < 1e-9:
-        display_score = np.linspace(0.99, 0.40, TOP_N)
+        display_score = np.linspace(0.99, 0.40, top_n)
     else:
         display_score = 0.40 + 0.59 * (raw - rmin) / (rmax - rmin)
     # enforce non-increasing by construction (already sorted descending)

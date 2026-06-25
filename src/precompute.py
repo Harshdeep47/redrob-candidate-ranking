@@ -17,6 +17,7 @@ Usage:
     python -m src.precompute --candidates /path/to/candidates.jsonl --out artifacts/
 """
 import argparse
+import hashlib
 import time
 import orjson
 import numpy as np
@@ -26,6 +27,27 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 
 from src.features import extract_features
 from src.text_features import candidate_document, JD_TEXT_CLEAN
+
+
+def file_fingerprint(path: str) -> str:
+    """
+    Cheap fingerprint of the candidates file: size + sha256 of the first and
+    last 1MB, rather than hashing the full 465MB file on every run. Good
+    enough to detect "this is a different file" without adding meaningful
+    time to either precompute or rank.py's artifact-validity check.
+    """
+    h = hashlib.sha256()
+    size = 0
+    with open(path, "rb") as f:
+        head = f.read(1024 * 1024)
+        h.update(head)
+        size = len(head)
+        f.seek(0, 2)
+        total_size = f.tell()
+        if total_size > 1024 * 1024:
+            f.seek(-1024 * 1024, 2)
+            h.update(f.read())
+    return f"{total_size}:{h.hexdigest()}"
 
 
 def main():
@@ -82,6 +104,14 @@ def main():
 
     # candidate_ids order must match row order of features.parquet AND candidate_tfidf.npz
     pd.Series(candidate_ids, name="candidate_id").to_csv(f"{args.out}/candidate_order.csv", index=False)
+
+    # Fingerprint of the source file these artifacts were built from. rank.py
+    # checks this before trusting cached artifacts -- prevents silently
+    # ranking against stale artifacts built from a different candidates file.
+    fingerprint = file_fingerprint(args.candidates)
+    with open(f"{args.out}/source.meta.json", "w") as f:
+        orjson_str = orjson.dumps({"source_fingerprint": fingerprint, "n_candidates": n})
+        f.write(orjson_str.decode())
 
     print(f"\nTotal precompute time: {time.time()-t0:.1f}s")
     print(f"Artifacts written to {args.out}/")

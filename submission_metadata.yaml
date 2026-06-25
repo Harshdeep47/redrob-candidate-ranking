@@ -1,0 +1,111 @@
+# submission_metadata.yaml
+#
+# NOTE: the hackathon bundle references a `submission_metadata_template.yaml`
+# that should be used as the canonical structure for this file. That template
+# was not available when this file was authored -- this is a best-effort
+# reconstruction covering the fields a metadata file of this kind would
+# typically need (team/contact info, approach summary, AI tool declaration,
+# compute footprint, reproducibility links). Cross-check field names against
+# the actual template before final submission and adjust as needed.
+
+submission:
+  challenge: "Intelligent Candidate Discovery & Ranking Challenge"
+  organizer: "Redrob"
+  submission_date: "2026-06-26"   # update to actual submission date
+
+team:
+  name: "Harshdeep Singh"
+  affiliation: "Thapar Institute of Engineering and Technology"
+  contact_email: ""              # fill in
+  github_repo: "https://github.com/Harshdeep47/redrob-candidate-ranking"  # update to actual repo URL
+
+approach_summary: >
+  A CPU-only, no-GPU, no-network hybrid ranking system. Reads a single job
+  description (parsed by hand into structured requirements, since there is
+  only one JD for this challenge) and ranks 100,000 candidate profiles using
+  a combination of TF-IDF cosine semantic similarity, taxonomy-weighted
+  skill scoring that trusts platform-verified assessment scores over
+  self-reported proficiency, and a title-relevance gate built after
+  discovering that career-history description text is only reliably
+  topic-matched to its own title for ML/AI-relevant roles (~100% of the
+  time) versus common non-technical titles (~16% of the time). Honeypot
+  detection uses two clean signals (expert-proficiency-with-zero-duration
+  skills; years-of-experience vs. career-history-duration mismatch) found
+  via direct data exploration. All penalties for disqualifying conditions
+  (irrelevant title history, consulting-only career, CV/speech-only skill
+  profile, non-India + non-relocating location, honeypot flags) are applied
+  multiplicatively rather than additively, since the JD frames these as
+  near-hard constraints rather than soft preferences.
+
+architecture:
+  embedding_method: "TF-IDF (scikit-learn TfidfVectorizer) + cosine similarity"
+  embedding_method_rationale: >
+    Deliberately did not use a neural embedding model (e.g.
+    sentence-transformers). Installing it pulled a multi-GB CUDA/PyTorch
+    stack even for CPU-only inference, which is a real risk for clean
+    reproduction in a sandboxed Docker container. TF-IDF is sufficient here
+    because the domain vocabulary is narrow and largely closed (133 known
+    skills, 48 known titles, a single fixed JD).
+  ranking_model: "Hand-weighted hybrid score (weighted sum of normalized features) with multiplicative gating penalties"
+  ranking_model_rationale: >
+    No hidden ground truth was available to fit a learned ranker against, so
+    weights were chosen by reasoning about the JD's explicitly stated
+    priorities rather than fit to data. A production version with labeled
+    outcomes would replace this with a learned model (e.g. logistic
+    regression or gradient-boosted trees over the same feature set).
+  honeypot_detection:
+    - "Skill marked 'expert' proficiency with duration_months == 0"
+    - "years_of_experience vs sum(career_history duration_months)/12 differing by >3 years"
+    detected_count: 68
+  title_relevance_gate: >
+    Dominant multiplicative gate (0.05-1.0) based on a closed taxonomy of
+    all 48 distinct titles found in the dataset, built after finding that
+    non-technical-titled candidates' career_history descriptions are
+    topically mismatched to their stated title ~84% of the time (i.e. not
+    reliable evidence), while ML/AI-titled candidates' descriptions match
+    ~100% of the time.
+
+compute_footprint:
+  ranking_step_runtime_seconds: "~4-5 (cached artifacts) on 100,000 candidates"
+  ranking_step_runtime_cold_seconds: "~55-60 (includes one-time precompute) on 100,000 candidates"
+  peak_memory_mb: "~937"
+  gpu_used: false
+  network_calls_during_ranking: false
+  disk_intermediate_state_mb: "~127"
+
+ai_tools_declaration:
+  used_ai_tools: true
+  tools_used:
+    - "Claude (Anthropic) -- used throughout: data exploration, feature/architecture
+       design discussion, code authoring, debugging, and documentation"
+  human_engineering_summary: >
+    All architectural decisions (title-relevance gating, honeypot detection
+    signals, multiplicative vs. additive penalty structure, TF-IDF vs. neural
+    embedding tradeoff, visa/relocation gate) were driven by directly
+    exploring the actual dataset and JD/spec documents, identifying concrete
+    bugs in early output (e.g. an HR Manager ranking in the top 100 on
+    self-reported keyword strength), root-causing them against the data, and
+    iterating. Code was written and run interactively against the real
+    100K-candidate file at every step, not generated once and submitted
+    unmodified. See git log for the iteration history, including the v1
+    output that reproduces the bug and the commit that fixes it.
+  honest_disclosure: >
+    The candidate (Harshdeep Singh) used Claude as a development collaborator
+    for this submission, including code authoring. Final architecture
+    decisions, dataset investigation direction, and validation of outputs
+    were reviewed and directed by the candidate.
+
+reproducibility:
+  single_command: "python rank.py --candidates ./candidates.jsonl --out ./submission.csv"
+  sandbox_link: ""   # fill in once deployed -- see SANDBOX.md for setup instructions
+  sandbox_platform: "Streamlit Cloud"  # update if a different platform is used
+
+deliverables_checklist:
+  github_repo: true
+  readme_with_single_command: true
+  requirements_txt: true
+  precompute_script_included: true
+  submission_metadata_yaml: true
+  methodology_pdf: true
+  ranked_output_csv: true
+  sandbox_demo_link: false   # set true once deployed and link is filled in above
