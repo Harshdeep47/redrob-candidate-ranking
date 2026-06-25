@@ -14,7 +14,7 @@ from src.jd_requirements import (
     EXPERIENCE_IDEAL_MIN, EXPERIENCE_IDEAL_MAX, EXPERIENCE_MIN_SOFT, EXPERIENCE_MAX_SOFT,
     EXPERIENCE_HARD_FLOOR, NOTICE_IDEAL_MAX_DAYS, NOTICE_ACCEPTABLE_MAX_DAYS,
     CONSULTING_FIRMS, NON_CODING_SENIOR_TITLES, TITLE_LADDER_WORDS,
-    PRODUCTION_SIGNAL_PHRASES, RESEARCH_ONLY_SIGNAL_PHRASES,
+    PRODUCTION_SIGNAL_PHRASES, RESEARCH_ONLY_SIGNAL_PHRASES, title_tier,
 )
 
 TODAY = date(2026, 6, 25)  # dataset's implied "now" -- last_active_date values cluster up to 2026-05
@@ -50,7 +50,8 @@ def location_fit_score(country: str, location: str, willing_to_relocate: bool) -
             return 1.0
         if location in LOCATION_TIER_B:
             return 0.9
-        return 0.75
+        return 0.75  # other India Tier-1 cities (Bangalore, Chennai, Kolkata, etc.) -- relocation-plausible
+    # Outside India: JD says "case-by-case, no visa sponsorship"
     return 0.25 if willing_to_relocate else 0.08
 
 
@@ -122,14 +123,69 @@ def production_signal_score(career_history: list) -> float:
     JD's central ask: 'has shipped at least one end-to-end ranking/search/recommendation
     system to real users at meaningful scale.' Scan descriptions for production-deployment
     language vs. pure-research language.
+
+    IMPORTANT: only descriptions attached to a Tier S/A title are trusted as signal here.
+    Exploration showed descriptions are randomly shuffled relative to title ~84% of the
+    time for non-technical titles, so scanning ALL descriptions regardless of title would
+    let an HR Manager's randomly-assigned "shipped to production" description (meant for
+    a different candidate's tech role) count as a positive signal. We only read
+    descriptions from roles whose own title already indicates plausible relevance.
     """
-    all_text = " ".join(ch.get("description", "").lower() for ch in career_history)
-    prod_hits = sum(1 for phrase in PRODUCTION_SIGNAL_PHRASES if phrase in all_text)
-    research_hits = sum(1 for phrase in RESEARCH_ONLY_SIGNAL_PHRASES if phrase in all_text)
+    relevant_text = " ".join(
+        ch.get("description", "").lower()
+        for ch in career_history
+        if title_tier(ch["title"]) in {"direct", "adjacent"}
+    )
+    if not relevant_text:
+        return 0.0
+    prod_hits = sum(1 for phrase in PRODUCTION_SIGNAL_PHRASES if phrase in relevant_text)
+    research_hits = sum(1 for phrase in RESEARCH_ONLY_SIGNAL_PHRASES if phrase in relevant_text)
     score = min(1.0, 0.25 * prod_hits)
     if research_hits > 0 and prod_hits == 0:
         score = max(0.0, score - 0.3)
     return score
+
+
+def title_relevance_gate(current_title: str, career_history: list) -> float:
+    """
+    The dominant gating signal. Returns a multiplier in (0, 1].
+
+    Built after discovering (see notebooks/explore3.py) that career_history
+    description text is topic-matched to the role's title ~100% of the time
+    for ML/AI titles, but only ~16% of the time for common non-tech titles
+    (the other 84% are randomly shuffled descriptions from an unrelated
+    pool). That means description content can't be trusted to GRANT
+    relevance on its own -- only title can. This directly defends against
+    the JD's explicitly-stated trap: a non-technical title padded with
+    AI-flavored skills/summary text must not outrank someone whose actual
+    job has been doing this work.
+
+    Logic:
+      - current title in Tier S (direct ML/AI/search role) -> 1.0
+      - current title in Tier A (adjacent data/software role) -> 0.6,
+        bumped to 0.8 if ANY prior role was Tier S (real transition story,
+        e.g. the data engineer moving into ML)
+      - current title in Tier B (generic dev role) -> 0.35, bumped to 0.6
+        if a prior role was Tier S
+      - current title in Tier D (no technical connection at all) -> 0.05,
+        bumped only modestly (0.25) even with a Tier S prior role, since a
+        regression FROM an ML role INTO e.g. HR Manager is itself a strong
+        signal this person is no longer doing this work and is much less
+        believable as a transition story than the reverse direction.
+    """
+    cur_tier = title_tier(current_title)
+    history_tiers = {title_tier(ch["title"]) for ch in career_history}
+    had_direct_history = "direct" in history_tiers
+
+    if cur_tier == "direct":
+        return 1.0
+    if cur_tier == "adjacent":
+        return 0.8 if had_direct_history else 0.6
+    if cur_tier == "weak":
+        return 0.6 if had_direct_history else 0.35
+    if cur_tier == "none":
+        return 0.25 if had_direct_history else 0.05
+    return 0.3  # unknown title, shouldn't happen given closed vocabulary
 
 
 def skill_profile_features(skills: list, assessment_scores: dict) -> dict:
@@ -251,6 +307,7 @@ def extract_features(candidate: dict) -> dict:
         "experience_fit": experience_fit_score(p["years_of_experience"]),
         "location_fit": location_fit_score(p["country"], p["location"], sig["willing_to_relocate"]),
         "notice_fit": notice_period_score(sig["notice_period_days"]),
+        "title_relevance_gate": title_relevance_gate(p["current_title"], history),
         "consulting_penalty": consulting_only_penalty(history, p["current_industry"], p["current_company"]),
         "architecture_penalty": architecture_only_penalty(p["current_title"], history),
         "title_chaser_penalty": title_chaser_penalty(history),

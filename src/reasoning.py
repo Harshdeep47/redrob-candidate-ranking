@@ -100,8 +100,14 @@ def _reasoning_for(rec: dict, rank: int) -> str:
             named_core.append((s["name"], s["proficiency"], score))
     named_core.sort(key=lambda x: (x[2] is None, -(x[2] or 0)))
 
-    # Most relevant prior role for "what they actually built"
-    most_relevant_role = history[0] if history else None
+    # Most relevant prior role for "what they actually built" -- only trust
+    # the description if the role's OWN title is plausibly relevant (Tier
+    # S/A). Descriptions attached to irrelevant titles (HR Manager, Sales
+    # Executive, etc.) are randomly shuffled ~84% of the time in this
+    # dataset and would be misleading to quote as evidence either way.
+    from src.jd_requirements import title_tier as _title_tier
+    relevant_roles = [ch for ch in history if _title_tier(ch["title"]) in {"direct", "adjacent"}]
+    most_relevant_role = relevant_roles[0] if relevant_roles else None
 
     # --- positive clauses pool (only built from facts that exist) ---
     positives = []
@@ -119,7 +125,7 @@ def _reasoning_for(rec: dict, rank: int) -> str:
     if most_relevant_role:
         desc = most_relevant_role["description"]
         snippet_words = desc.split()
-        snippet = " ".join(snippet_words[:18]) + ("..." if len(snippet_words) > 18 else "")
+        snippet = " ".join(snippet_words[:14]) + ("..." if len(snippet_words) > 14 else "")
         positives.append(f"most recent role describes: \"{snippet}\"")
 
     if sig.get("github_activity_score", -1) >= 40:
@@ -147,6 +153,8 @@ def _reasoning_for(rec: dict, rank: int) -> str:
         concerns.append(CONCERN_PHRASES["under_experienced"](yoe))
     elif yoe > 9:
         concerns.append(CONCERN_PHRASES["over_experienced"](yoe))
+    if not relevant_roles:
+        concerns.append(f"current and prior titles ({title}) show no direct ML/AI/search role history")
 
     # --- assemble: vary sentence structure deterministically per-candidate ---
     pos_take = positives[:3] if len(positives) >= 3 else positives
@@ -179,8 +187,18 @@ def _reasoning_for(rec: dict, rank: int) -> str:
         tmpl = rnd.choice(templates_low)
 
     reasoning = tmpl.format(pos=pos_str, con=con_str)
-    # CSV-safety: collapse newlines, cap length
+    # CSV-safety: collapse whitespace/newlines
     reasoning = " ".join(reasoning.split())
-    if len(reasoning) > 400:
-        reasoning = reasoning[:397] + "..."
+    # Clause-aware truncation: cut at the last semicolon/period before the
+    # limit rather than mid-word, so we never emit a dangling fragment like
+    # "not curr..." in the reasoning column.
+    MAX_LEN = 380
+    if len(reasoning) > MAX_LEN:
+        cut = reasoning[:MAX_LEN]
+        last_boundary = max(cut.rfind(";"), cut.rfind(". "))
+        if last_boundary > MAX_LEN * 0.5:
+            reasoning = cut[:last_boundary].rstrip(";. ") + "."
+        else:
+            last_space = cut.rfind(" ")
+            reasoning = cut[:last_space].rstrip(";,") + "."
     return reasoning

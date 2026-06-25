@@ -59,3 +59,68 @@ PRODUCTION_SIGNAL_PHRASES = [
 RESEARCH_ONLY_SIGNAL_PHRASES = [
     "academic", "research lab", "published paper", "thesis", "phd research",
 ]
+
+# --- Title taxonomy ----------------------------------------------------------
+# Built from the FULL closed vocabulary of 48 distinct titles found across
+# current_title and career_history[].title in the dataset (see
+# notebooks/explore3.py). This is the dominant signal for whether a candidate
+# has ever held a role where doing this JD's work is plausible at all -- it
+# matters more than skills-list content or free-text description content,
+# because exploratory analysis showed career_history descriptions are
+# correctly topic-matched to ML/AI titles ~100% of the time, but are randomly
+# shuffled relative to non-tech titles ~84% of the time. A "HR Manager" whose
+# description happens to mention AI/ML, or whose self-reported skills list
+# includes RAG/Pinecone/etc., is the dataset's primary adversarial trap (see
+# JD's closing note: "a candidate who has all the AI keywords listed as
+# skills but whose title is 'Marketing Manager' is not a fit").
+
+# Tier S: directly does this JD's work today.
+TITLE_TIER_DIRECT = {
+    "ML Engineer", "AI Research Engineer", "Junior ML Engineer",
+    "Senior Software Engineer (ML)", "Data Scientist", "Computer Vision Engineer",
+    "AI Specialist", "Machine Learning Engineer", "Recommendation Systems Engineer",
+    "Search Engineer", "Applied ML Engineer", "AI Engineer", "Senior Data Scientist",
+    "NLP Engineer", "Senior Machine Learning Engineer", "Senior NLP Engineer",
+    "Staff Machine Learning Engineer", "Senior Applied Scientist", "Lead AI Engineer",
+    "Senior AI Engineer", "Senior ML Engineer — Search & Ranking",
+}
+
+# Tier A: adjacent data/software roles that could plausibly have built the
+# kind of system the JD needs, especially at higher seniority -- but title
+# alone doesn't confirm it the way Tier S does. Real fit depends on what
+# their skills/career history actually show on top of this title.
+TITLE_TIER_ADJACENT = {
+    "Analytics Engineer", "Data Engineer", "Data Analyst", "Backend Engineer",
+    "Senior Data Engineer", "Senior Software Engineer", "Software Engineer",
+    "Full Stack Developer", "Cloud Engineer", "DevOps Engineer",
+}
+
+# Tier B: software roles with little inherent connection to ranking/retrieval/
+# ML, but still technical -- treat as weakly adjacent, mostly via Python/infra
+# overlap rather than ML substance.
+TITLE_TIER_WEAK = {
+    "Java Developer", ".NET Developer", "Mobile Developer", "QA Engineer",
+    "Frontend Engineer",
+}
+
+# Tier D: no technical/ML connection at all. A candidate whose CURRENT title
+# is in this set is treated as fundamentally not-a-fit for this JD regardless
+# of self-reported skills or stray description keywords, UNLESS their career
+# HISTORY contains a Tier S or Tier A title (i.e. they transitioned roles).
+TITLE_TIER_NONE = {
+    "Business Analyst", "Mechanical Engineer", "Project Manager", "Accountant",
+    "Graphic Designer", "HR Manager", "Customer Support", "Civil Engineer",
+    "Operations Manager", "Content Writer", "Sales Executive", "Marketing Manager",
+}
+
+
+def title_tier(title: str) -> str:
+    if title in TITLE_TIER_DIRECT:
+        return "direct"
+    if title in TITLE_TIER_ADJACENT:
+        return "adjacent"
+    if title in TITLE_TIER_WEAK:
+        return "weak"
+    if title in TITLE_TIER_NONE:
+        return "none"
+    return "unknown"
