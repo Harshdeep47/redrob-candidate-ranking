@@ -29,8 +29,6 @@ STOPWORD_EXTRA = {
     "year", "years", "experience", "company", "team", "work", "worked", "working",
     "role", "project", "projects", "using", "used", "build", "built", "building",
 }
-
-
 def clean_text(text: str) -> str:
     text = text.lower()
     text = re.sub(r"[^a-z0-9+#./\- ]", " ", text)
@@ -39,21 +37,49 @@ def clean_text(text: str) -> str:
 
 def candidate_document(candidate: dict) -> str:
     """Concatenate the candidate's text-bearing fields into one document for TF-IDF."""
+
     p = candidate["profile"]
+
     parts = [
         p.get("headline", ""),
         p.get("summary", ""),
         p.get("current_title", ""),
         p.get("current_industry", ""),
     ]
+
     for ch in candidate.get("career_history", []):
         parts.append(ch.get("title", ""))
         parts.append(ch.get("description", ""))
         parts.append(ch.get("industry", ""))
+
+    # Skill weighting
     for s in candidate.get("skills", []):
-        # repeat skill name proportional to proficiency so stronger/verified skills
-        # weigh a bit more in the bag-of-words signal too
-        parts.append(s.get("name", ""))
+        skill = s.get("name", "")
+        prof = s.get("proficiency", "").lower()
+
+        if prof in ("expert", "advanced"):
+            parts.extend([skill] * 3)
+        elif prof == "intermediate":
+            parts.extend([skill] * 2)
+        else:
+            parts.append(skill)
+
+    # Certifications
+    for cert in candidate.get("certifications", []):
+        parts.append(cert.get("name", ""))
+
+    # Education
+    for edu in candidate.get("education", []):
+        parts.append(edu.get("degree", ""))
+        parts.append(edu.get("field", ""))
+
+    # Languages
+    for lang in candidate.get("languages", []):
+        if isinstance(lang, dict):
+            parts.append(lang.get("name", ""))
+        else:
+            parts.append(str(lang))
+
     return clean_text(" ".join(parts))
 
 

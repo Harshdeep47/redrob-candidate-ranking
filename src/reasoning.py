@@ -171,9 +171,9 @@ def _reasoning_for(rec: dict, rank: int) -> str:
         "Reasonable fit \u2014 {pos}. {con}",
     ]
     templates_low = [
-        "Included as filler: {pos}. {con}",
-        "Weaker fit: {pos}. {con}",
-        "{pos}, but {con}",
+    "Partial match: {pos}. {con}",
+    "Weaker fit: {pos}. {con}",
+    "{pos}, but {con}",
     ]
 
     pos_str = "; ".join(pos_take)

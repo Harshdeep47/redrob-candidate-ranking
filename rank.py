@@ -157,16 +157,22 @@ def main():
     top100["rank"] = np.arange(1, top_n + 1)
 
     # Rescale score into the (0,1] display range expected by the sample
-    # submission, while preserving strict ordering (ties broken by candidate_id
-    # already, above).
     raw = top100["final_score"].values
     rmin, rmax = raw.min(), raw.max()
+
     if rmax - rmin < 1e-9:
-        display_score = np.linspace(0.99, 0.40, top_n)
+        scores = np.linspace(0.99, 0.40, top_n)
     else:
-        display_score = 0.40 + 0.59 * (raw - rmin) / (rmax - rmin)
-    # enforce non-increasing by construction (already sorted descending)
-    top100["score"] = np.round(display_score, 4)
+        scores = 0.40 + 0.59 * (raw - rmin) / (rmax - rmin)
+
+    scores = np.round(scores, 4)
+
+    # Break ties after rounding while preserving order
+    for i in range(1, len(scores)):
+        if scores[i] >= scores[i - 1]:
+            scores[i] = round(scores[i - 1] - 0.0001, 4)
+
+    top100["score"] = scores
 
     # --- build reasoning strings from raw candidate records (need original text) ---
     print("Building reasoning strings...")
@@ -174,7 +180,14 @@ def main():
     reasoning_map = build_reasoning(args.candidates, set(top100["candidate_id"]), top100)
     top100["reasoning"] = top100["candidate_id"].map(reasoning_map)
     print(f"Reasoning built in {time.time()-t2:.1f}s")
+    # Ensure displayed scores are strictly decreasing
+    scores = top100["score"].to_numpy().copy()
 
+    for i in range(1, len(scores)):
+        if scores[i] >= scores[i - 1]:
+            scores[i] = round(scores[i - 1] - 0.0001, 4)
+
+    top100["score"] = scores
     out_df = top100[["candidate_id", "rank", "score", "reasoning"]]
     out_df.to_csv(args.out, index=False)
 
