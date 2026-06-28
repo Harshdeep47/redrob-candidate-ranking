@@ -27,6 +27,7 @@ import os
 import sys
 import tempfile
 import time
+from datetime import datetime
 
 import orjson
 import pandas as pd
@@ -36,6 +37,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 APP_NAME = "Talent Signal"
 APP_TAGLINE = "Rank candidates the way a great recruiter reads a resume \u2014 not by keyword count."
+
+if "run_history" not in st.session_state:
+    st.session_state.run_history = []  # most recent last; rendered reversed
+if "card_filter" not in st.session_state:
+    st.session_state.card_filter = ""
 
 st.set_page_config(page_title=APP_NAME, page_icon="\U0001F9ED", layout="wide")
 
@@ -121,6 +127,21 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     border: 1.5px dashed #D9D2EE; border-radius: 14px; padding: 1.6rem;
     text-align: center; color: #8B85A0; font-size: .92rem; margin: 0 0 .5rem 2.5rem;
 }
+
+/* ---------- Sidebar: run history ---------- */
+section[data-testid="stSidebar"] .block-container { padding-top: 1.4rem; }
+.hist-empty {
+    border: 1.5px dashed #3A3552; border-radius: 10px; padding: .9rem;
+    text-align: center; color: #8B85A0; font-size: .8rem; margin-top: .3rem;
+}
+.hist-item {
+    background: #211D38; border: 1px solid #34304F; border-radius: 10px;
+    padding: .65rem .8rem; margin-bottom: .5rem;
+}
+.hist-item .hist-name { color: #E8E3F7; font-size: .82rem; font-weight: 600; margin: 0; }
+.hist-item .hist-meta { color: #9089AE; font-size: .73rem; margin: .2rem 0 0 0; }
+.hist-item .hist-score { color: #C9B8FF; font-weight: 700; }
+.sidebar-foot { color: #8B85A0; font-size: .78rem; line-height: 1.5; }
 </style>
 """,
     unsafe_allow_html=True,
@@ -143,19 +164,52 @@ st.markdown(
 )
 
 with st.sidebar:
-    st.subheader("How it ranks candidates")
-    st.markdown(
-        """
-- Job-title relevance is the dominant signal, weighted above keyword overlap
-- Verified skill-assessment scores are trusted over self-reported proficiency
-- Multiplicative penalties for disqualifying conditions (e.g. consulting-only
-  background, visa/relocation mismatch, internally-inconsistent profiles)
-- Every ranked candidate gets a fact-grounded written reason, not a generic
-  template
-        """
-    )
+    st.markdown("##### \U0001F4CB Run history")
+    if not st.session_state.run_history:
+        st.markdown(
+            '<div class="hist-empty">Your past runs will show up here \u2014 '
+            'nothing yet this session.</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        for i, run in enumerate(reversed(st.session_state.run_history)):
+            st.markdown(
+                f"""
+<div class="hist-item">
+  <p class="hist-name">{html.escape(run['filename'])}</p>
+  <p class="hist-meta">{run['timestamp']} &middot; {run['n_candidates']:,} candidates &middot; {run['elapsed']:.1f}s</p>
+  <p class="hist-meta">Top score: <span class="hist-score">{run['top_score']}</span></p>
+</div>
+""",
+                unsafe_allow_html=True,
+            )
+            st.download_button(
+                "Re-download CSV", data=run["csv_bytes"],
+                file_name=f"ranked_candidates_{run['timestamp_safe']}.csv",
+                mime="text/csv", key=f"hist_dl_{i}",
+                use_container_width=True,
+            )
+
     st.divider()
-    st.caption("Full architecture writeup: `explainer/` folder in the repo.")
+    st.markdown("##### \U0001F50D Filter results")
+    st.session_state.card_filter = st.text_input(
+        "Search by name, title, or company",
+        value=st.session_state.card_filter,
+        placeholder="e.g. Razorpay, NLP Engineer...",
+        label_visibility="collapsed",
+        disabled=not st.session_state.run_history,
+    )
+    if not st.session_state.run_history:
+        st.caption("Available once you have at least one run.")
+
+    st.divider()
+    st.markdown(
+        '<p class="sidebar-foot">Job-title relevance and verified skill scores '
+        'outrank keyword overlap, and disqualifying conditions multiply the score '
+        'down rather than just subtracting points. Full writeup: '
+        '<code>explainer/</code> in the repo.</p>',
+        unsafe_allow_html=True,
+    )
 
 st.markdown(
     """
@@ -280,14 +334,27 @@ def load_display_fields(candidates_path: str, wanted_ids: set) -> dict:
     return out
 
 
-def render_cards(result_df: pd.DataFrame, display_fields: dict):
+def render_cards(result_df: pd.DataFrame, display_fields: dict, filter_text: str = ""):
+    filter_text = (filter_text or "").strip().lower()
+    shown = 0
     for _, row in result_df.iterrows():
         cid = row["candidate_id"]
         info = display_fields.get(cid, {})
-        name = html.escape(str(info.get("name", cid)))
-        title = html.escape(str(info.get("title", "")))
-        company = html.escape(str(info.get("company", "")))
-        location = html.escape(str(info.get("location", "")))
+        name_raw = str(info.get("name", cid))
+        title_raw = str(info.get("title", ""))
+        company_raw = str(info.get("company", ""))
+        location_raw = str(info.get("location", ""))
+
+        if filter_text:
+            haystack = f"{name_raw} {title_raw} {company_raw} {location_raw}".lower()
+            if filter_text not in haystack:
+                continue
+
+        shown += 1
+        name = html.escape(name_raw)
+        title = html.escape(title_raw)
+        company = html.escape(company_raw)
+        location = html.escape(location_raw)
         subtitle = " &middot; ".join(x for x in [title, company, location] if x)
         rank = int(row["rank"])
         badge_class = "rank-badge top10" if rank <= 10 else "rank-badge"
@@ -314,6 +381,11 @@ def render_cards(result_df: pd.DataFrame, display_fields: dict):
 """,
             unsafe_allow_html=True,
         )
+
+    if filter_text and shown == 0:
+        st.info(f"No candidates match \u201c{filter_text}\u201d.")
+    elif filter_text:
+        st.caption(f"Showing {shown} of {len(result_df)} candidates matching \u201c{filter_text}\u201d.")
 
 
 if run_button and candidates_jsonl_bytes is not None:
@@ -373,16 +445,30 @@ if run_button and candidates_jsonl_bytes is not None:
             tab_cards, tab_table = st.tabs(["Candidate cards", "Raw table"])
 
             with tab_cards:
-                render_cards(result_df, display_fields)
+                render_cards(result_df, display_fields, st.session_state.card_filter)
 
             with tab_table:
                 st.dataframe(result_df, use_container_width=True, hide_index=True)
 
             csv_buffer = io.StringIO()
             result_df.to_csv(csv_buffer, index=False)
+            csv_text = csv_buffer.getvalue()
+
+            run_dt = datetime.now()
+            st.session_state.run_history.append({
+                "filename": uploaded.name,
+                "timestamp": run_dt.strftime("%b %d, %H:%M"),
+                "timestamp_safe": run_dt.strftime("%Y%m%d_%H%M%S"),
+                "n_candidates": n_candidates,
+                "elapsed": elapsed,
+                "top_score": top_score,
+                "csv_bytes": csv_text,
+            })
+            st.session_state.run_history = st.session_state.run_history[-8:]  # cap history length
+
             st.download_button(
                 "Download results as CSV",
-                data=csv_buffer.getvalue(),
+                data=csv_text,
                 file_name="ranked_candidates.csv",
                 mime="text/csv",
                 type="primary",
